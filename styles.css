@@ -20,3 +20,20 @@
 
 /* Citation-impact analysis */
 .citation-stats{margin:0 0 18px}.citation-stats .stat-card{min-height:132px}.citation-stats .stat-card strong{margin:12px 0 4px}.citation-stats .stat-card small{white-space:normal;line-height:1.4}.citation-stats+.chart-grid{margin-top:2px}
+
+/* Higher education: July–June academic-year comparison */
+.academic-filter-bar{display:flex;align-items:end;flex-wrap:wrap;gap:14px;margin:0 0 13px;padding:16px 19px;background:#fff;border:1px solid var(--line);border-radius:12px}
+.academic-filter-bar .field{min-width:180px;flex:0 1 230px;margin:0}
+.academic-filter-bar select{width:100%}
+.academic-range-buttons{display:flex;flex-wrap:wrap;gap:8px;padding-bottom:1px}
+.academic-info{font-size:12px;line-height:1.6;color:#58758b;margin:0 0 19px;background:#edf6fa;border:1px solid #dceaf1;padding:12px 15px;border-radius:9px}
+.academic-stats{margin-bottom:18px}
+.academic-table-panel{margin-bottom:17px}
+#academicQuartileChart .year-qrow{grid-template-columns:72px 1fr 52px}
+#academicMonthChart{margin:12px 0 34px;min-height:240px}
+#academicMonthChart .month-label{font-size:10px}
+#academicMonthChart .month-col:first-child .month-bar{background:#1d8792}
+#academicTrendChart .year-chart-column{max-width:140px}
+#academicTrendChart .year-chart-label{white-space:nowrap}
+#academicTrendChart .year-chart-bar{transition:height .2s ease}
+@media(max-width:770px){.academic-filter-bar{padding:13px}.academic-filter-bar .field{min-width:130px;flex:1 1 140px}.academic-range-buttons{width:100%}#academicQuartileChart .year-qrow{grid-template-columns:62px 1fr 37px}}
