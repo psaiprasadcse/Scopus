@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101f38">
+  <meta name="description" content="Interactive Scopus faculty publication dashboard from local Excel reports. Compare 2024–2026 Scopus publications by institution and faculty, including Q1–Q4 and monthly trends.">
+  <title>Scopus Research Insights | Faculty Publications</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script defer src="dashboard-core.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><div class="brand-icon" aria-hidden="true">S<span>·</span></div><div><strong>Scopus <span>Insights</span></strong><small>RESEARCH ANALYTICS PORTAL</small></div></div>
+    <div class="top-actions">
+      <span class="privacy-note"><span class="privacy-dot"></span> Local browser processing</span>
+      <button class="btn ghost" id="demoBtn" type="button">Try demo</button><button class="btn ghost" id="clearData" type="button">Clear data</button>
+      <label class="btn primary" for="xlsxInput"><span aria-hidden="true">↥</span> Upload Excel <input id="xlsxInput" type="file" accept=".xlsx,.xls" multiple hidden></label>
+    </div>
+  </header>
+  <main>
+    <section class="welcome" id="welcomePanel">
+      <div class="welcome-copy">
+        <span class="eyebrow">FACULTY RESEARCH INTELLIGENCE</span>
+        <h1>Understand every publication.<br><span>Compare every research year.</span></h1>
+        <p>Upload a single multi-year Excel report produced by the updated Scopus program, or several annual reports. Compare publication counts and CiteScore quartiles year by year—across the institution or for any individual researcher.</p>
+        <div class="welcome-actions"><label class="btn primary large" for="welcomeInput">Choose Excel report <input id="welcomeInput" type="file" accept=".xlsx,.xls" multiple hidden></label><button class="btn outline large" id="welcomeDemo" type="button">Explore with demo data</button></div>
+        <div class="mini-features"><span>✓ No API key required</span><span>✓ GitHub Pages ready</span><span>✓ No report stored on GitHub</span></div>
+      </div>
+      <div class="hero-preview" aria-hidden="true"><div class="preview-top"><span class="tiny-label">Publication overview</span><span class="mini-pill">2024–2026</span></div><div class="preview-number">124 <small>papers</small></div><div class="preview-bars"><i style="height:36%"></i><i style="height:56%"></i><i style="height:49%"></i><i style="height:82%"></i><i style="height:63%"></i><i style="height:91%"></i><i style="height:71%"></i><i style="height:79%"></i><i style="height:60%"></i><i style="height:94%"></i><i style="height:68%"></i><i style="height:85%"></i></div><div class="preview-quarts"><span><i class="dot q1"></i> Q1</span><span><i class="dot q2"></i> Q2</span><span><i class="dot q3"></i> Q3</span><span><i class="dot q4"></i> Q4</span></div><small class="preview-fake">Illustrative layout · no real publication data</small></div>
+    </section>
+
+    <section id="dashboard" class="dashboard" hidden>
+      <aside class="sidebar">
+        <div class="side-header"><span class="side-kicker">EXPLORE DATA</span><h2>Filters</h2></div>
+        <div class="field"><label for="yearFrom">From year</label><select id="yearFrom" aria-label="Compare from publication year"></select></div>
+        <div class="field"><label for="yearTo">To year</label><select id="yearTo" aria-label="Compare to publication year"></select></div>
+        <div class="year-quick-actions" aria-label="Quick comparison ranges"><button type="button" class="btn outline small" id="last2Btn">Last 2 years</button><button type="button" class="btn outline small" id="last3Btn">Last 3 years</button><button type="button" class="btn outline small" id="allYearsBtn">All years</button></div>
+        <div class="field"><label for="authorSearch">Find an author</label><input id="authorSearch" type="search" placeholder="Type author name…" autocomplete="off"><p class="field-hint">Type a name and select a matching profile.</p></div>
+        <div id="authorDirectory" class="author-directory" aria-label="Matching authors"></div>
+        <div class="sidebar-footer"><div class="privacy-card"><strong>🔒 Your data stays private</strong><p>Excel files are read in this browser tab only. No workbook is uploaded to GitHub. Use Clear data to discard the active report.</p></div><button class="btn outline full" id="resetFilters" type="button">Reset filters</button></div>
+      </aside>
+      <div class="content">
+        <div class="content-top"><div><div class="eyebrow muted" id="contextEyebrow">INSTITUTION OVERVIEW</div><h1 id="contextTitle">All authors</h1><p id="contextSubtitle">Publication profile and journal quartile analysis</p><div class="profile-links" id="profileLinks"></div></div><div class="content-actions"><span class="status-pill" id="dataBadge">Report loaded</span><button class="btn outline" id="exportSummaryBtn" type="button">↓ Export summary</button></div></div>
+        <div class="notice" id="dataNotice" role="status" hidden></div>
+        <div class="tabs" role="tablist" aria-label="Dashboard sections">
+          <button role="tab" class="tab active" aria-selected="true" data-tab="overview">Overview</button>
+          <button role="tab" class="tab" aria-selected="false" data-tab="comparison">Year comparison</button>
+          <button role="tab" class="tab" aria-selected="false" data-tab="papers">Publications</button>
+          <button role="tab" class="tab" aria-selected="false" data-tab="authors">Author ranking</button>
+          <button role="tab" class="tab" aria-selected="false" data-tab="journals">Journal metrics</button>
+        </div>
+        <section class="view" id="view-overview">
+          <div class="stats-grid">
+            <article class="stat-card main-stat"><span>Scopus papers</span><strong id="statTotal">0</strong><small id="statTotalNote">Unique papers in the selected scope</small></article>
+            <article class="stat-card"><span><i class="dot q1"></i> Q1 papers</span><strong id="statQ1">0</strong><small>Top CiteScore quartile</small></article>
+            <article class="stat-card"><span><i class="dot q2"></i> Q2 papers</span><strong id="statQ2">0</strong><small>Second quartile</small></article>
+            <article class="stat-card"><span><i class="dot q3"></i> Q3 papers</span><strong id="statQ3">0</strong><small>Third quartile</small></article>
+            <article class="stat-card"><span><i class="dot q4"></i> Q4 papers</span><strong id="statQ4">0</strong><small>Fourth quartile</small></article>
+            <article class="stat-card"><span><i class="dot qna"></i> Not classified</span><strong id="statNA">0</strong><small>CiteScore quartile unavailable</small></article>
+          </div>
+          <div class="chart-grid"><article class="panel panel-large"><div class="panel-header"><div><h2>Monthly publications</h2><p>Scopus publication cover month</p></div><span class="panel-tag" id="monthlyYear">YEAR</span></div><div class="month-chart" id="monthChart" aria-label="Monthly paper counts"></div></article><article class="panel"><div class="panel-header"><div><h2>Quartile distribution</h2><p>Best CiteScore category percentile</p></div></div><div class="donut-wrap"><div class="donut" id="quartileDonut"><div class="donut-hole"><strong id="donutCenter">0</strong><small>papers</small></div></div><div id="quartileLegend" class="legend"></div></div></article></div>
+          <div class="insights-grid"><article class="panel"><div class="panel-header"><div><h2>Top publishing sources</h2><p>Ranked by number of papers</p></div></div><div id="topJournals" class="compact-list"></div></article><article class="panel"><div class="panel-header"><div><h2>At a glance</h2><p>Key statistics from the selected data</p></div></div><div id="atGlance" class="fact-list"></div></article></div>
+        </section>
+        <section class="view" id="view-comparison" hidden>
+          <div class="comparison-intro"><div><span class="eyebrow">YEAR-ON-YEAR RESEARCH PERFORMANCE</span><h2 id="compareTitle">Institution publication comparison</h2><p id="compareSubtitle">Unique papers per year · best completed CiteScore quartiles</p></div><button class="btn outline small" id="exportYearComparison" type="button">↓ Download yearly comparison</button></div>
+          <div class="chart-grid">
+            <article class="panel"><div class="panel-header"><div><h2>Publication trend by year</h2><p>Institution totals deduplicate jointly authored papers</p></div><span class="panel-tag" id="comparePeriodLabel">YEAR RANGE</span></div><div id="yearComparisonChart" class="year-chart" aria-label="Publication count by year"></div></article>
+            <article class="panel"><div class="panel-header"><div><h2>Q1–Q4 across years</h2><p>Distribution of journal quartiles by publication year</p></div></div><div id="yearQuartileChart" class="year-qchart"></div><div class="comparison-legend"><span><i class="dot q1"></i>Q1</span><span><i class="dot q2"></i>Q2</span><span><i class="dot q3"></i>Q3</span><span><i class="dot q4"></i>Q4</span><span><i class="dot qna"></i>N/A</span></div></article>
+          </div>
+          <article class="panel"><div class="panel-header"><div><h2>Yearly publication and quartile statistics</h2><p>Growth compares each year with the previous year in the selected range; incomplete years are flagged</p></div></div><div class="table-wrap"><table><thead><tr><th>Year</th><th>Papers</th><th>Growth</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>N/A</th><th>Retrieval</th></tr></thead><tbody id="yearCompareRows"></tbody></table></div></article>
+          <article class="panel author-compare-panel"><div class="panel-header"><div><h2>Author-by-author year comparison</h2><p>One author at a time in the main charts; all faculty below for side-by-side comparison</p></div><button class="btn outline small" id="exportAuthorComparison" type="button">↓ Download author comparison</button></div><div class="toolbar"><input id="compareAuthorSearch" type="search" placeholder="Find faculty in comparison table…" autocomplete="off"></div><div class="table-wrap"><table><thead><tr id="compareAuthorsHead"></tr></thead><tbody id="compareAuthorsRows"></tbody></table></div><div class="table-footer"><span id="compareAuthorsCount"></span></div></article>
+          <p class="comparison-footnote">Important: Q1–Q4 use the latest completed CiteScore metric returned during retrieval, even for earlier publication years. These are not necessarily the historical quartiles that applied in each publication year. A failed API query is marked incomplete, not zero.</p>
+        </section>
+        <section class="view" id="view-papers" hidden>
+          <div class="panel"><div class="panel-header"><div><h2>Publication explorer</h2><p>Filter records and follow DOI / Scopus links</p></div><button class="btn outline small" id="exportPapers" type="button">↓ Download filtered CSV</button></div>
+            <div class="toolbar"><input id="paperSearch" type="search" placeholder="Search paper title, DOI, journal…"><select id="paperQuartile"><option value="">All quartiles</option><option>Q1</option><option>Q2</option><option>Q3</option><option>Q4</option><option value="N/A">N/A</option></select><select id="paperJournal"><option value="">All journals</option></select><select id="paperSort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="citescore">Highest CiteScore</option><option value="title">Title A–Z</option></select></div>
+            <div class="table-wrap"><table><thead><tr><th>Paper / DOI</th><th>Author</th><th>Published</th><th>Journal</th><th>Quartile</th><th>CiteScore</th><th>Links</th></tr></thead><tbody id="paperRows"></tbody></table></div><div class="table-footer"><span id="paperCount"></span><div class="pager"><button class="btn outline small" id="pagePrev" type="button">← Prev</button><span id="pageInfo"></span><button class="btn outline small" id="pageNext" type="button">Next →</button></div></div>
+          </div>
+        </section>
+        <section class="view" id="view-authors" hidden>
+          <div class="panel"><div class="panel-header"><div><h2>Faculty publication ranking</h2><p>Each author is counted separately for jointly authored papers</p></div><button class="btn outline small" id="exportAuthors" type="button">↓ Download CSV</button></div><div class="toolbar"><input id="rankingSearch" type="search" placeholder="Search author name…"><span class="field-hint" id="rankingCount"></span></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Author name</th><th>Total</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>N/A</th><th>Profile</th></tr></thead><tbody id="authorRows"></tbody></table></div></div>
+        </section>
+        <section class="view" id="view-journals" hidden>
+          <div class="panel"><div class="panel-header"><div><h2>Journal / source metrics</h2><p>Latest completed CiteScore available in the imported report</p></div><button class="btn outline small" id="exportJournals" type="button">↓ Download CSV</button></div><div class="toolbar"><input id="journalSearch" type="search" placeholder="Search journal, category or ISSN…"><select id="journalQuartile"><option value="">All quartiles</option><option>Q1</option><option>Q2</option><option>Q3</option><option>Q4</option><option value="N/A">N/A</option></select></div><div class="table-wrap"><table><thead><tr><th>Journal / source</th><th>Papers</th><th>CiteScore</th><th>Score year</th><th>Percentile</th><th>Quartile</th><th>Best subject category</th></tr></thead><tbody id="journalRows"></tbody></table></div><div class="table-footer"><span id="journalCount"></span></div></div>
+        </section>
+        <footer class="footer"><strong>Definitions matter.</strong> Year comparisons use publication cover year and month—not first indexing date. Q1–Q4 classifications are based on the best reported CiteScore subject percentile, not SJR or JCR. Missing metrics are kept as N/A. <span id="fileStatus"></span></footer>
+      </div>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
