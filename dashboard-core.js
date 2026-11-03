@@ -280,5 +280,103 @@
       return {author,byYear,total,citationsByYear,citationMissingByYear,citationTotal};
     }).sort((a,b)=>b.total-a.total||a.author.name.localeCompare(b.author.name));
   }
-  return {MONTHS,QUARTILES,ingestReports,matchingRecords,summarize,rankAuthors,compareYears,compareAuthors,number,norm,validQuartile,scopusRecordUrl,scopusCitedByUrl};
+  // Higher-education academic year: 1 July of startYear through 30 June of startYear+1.
+  // Do not assign undated/unknown-month papers arbitrarily to an academic year.
+  function academicStartYear(p) {
+    const cover = String(p && p.date || '').match(/^((?:19|20)\d{2})-(\d{1,2})(?:-|$)/);
+    const y = cover ? Number(cover[1]) : Number(p && p.year);
+    if (!Number.isInteger(y) || y < 1900 || y > 2100) return null;
+    const month = cover ? Number(cover[2])-1 : MONTHS.indexOf(asMonth(p.month,p.date));
+    if (month < 0) return null;
+    return month >= 6 ? y : y - 1;
+  }
+  const academicLabel = start => `${start}–${String(start+1).slice(-2)}`;
+  function academicStartOptions(data) {
+    const years=(data.years||[]).filter(Number.isInteger).sort((a,b)=>a-b);
+    if(!years.length)return [];
+    const starts=[];
+    for(let start=years[0]-1;start<=years.at(-1);start++)starts.push(start);
+    return starts;
+  }
+  function matchingAcademicRecords(data,authorKey,fromStart,toStart=fromStart) {
+    const earliest=Math.min(fromStart,toStart),latest=Math.max(fromStart,toStart);
+    // First apply the existing author/institution logic, then reconcile possible
+    // cross-year duplicate entries by their publication academic year and paper ID.
+    const source=matchingRecords(data,authorKey).filter(p=>{
+      const ay=academicStartYear(p);return ay!==null&&ay>=earliest&&ay<=latest;
+    });
+    const distinct=new Map();
+    for(const p of source){
+      const id=academicStartYear(p)+'|'+p.paperKey;
+      const old=distinct.get(id);
+      if(!old)distinct.set(id,{...p});
+      else {
+        if(p.citationCount!==null && (old.citationCount===null || (p.citationAsOf||'')>(old.citationAsOf||''))) {
+          old.citationCount=p.citationCount;old.citationAsOf=p.citationAsOf;
+        }
+        old.citedByUrl ||= p.citedByUrl;
+        if(old.quartile==='N/A'&&p.quartile!=='N/A')old.quartile=p.quartile;
+      }
+    }
+    return Array.from(distinct.values());
+  }
+  function academicCycleStatus(data,authorKey,start) {
+    const missingYears=[start,start+1].filter(y=>!data.years.includes(y));
+    const person=authorKey?data.authors.find(a=>a.key===authorKey):null;
+    const failedYears=[start,start+1].filter(y=>{
+      if(person) return /^(error|cancelled|incomplete)/i.test(person.statusByYear.get(y)||'');
+      return data.incompleteYears.has(y);
+    });
+    // Detect missing author-year result rows when the uploaded workbooks contain
+    // status rows for other authors but not the selected author.
+    const unverifiedYears=[start,start+1].filter(y=>{
+      const someStatus=data.authors.some(a=>a.statusByYear.has(y));
+      if(!someStatus)return false;
+      if(person)return !person.statusByYear.has(y) && !person.reportedTotals.has(y);
+      return data.authors.some(a=>!a.statusByYear.has(y) && !a.reportedTotals.has(y));
+    });
+    // Year-only records could belong to either adjacent July–June period.
+    // Their month must be reviewed and cannot safely enter the academic totals.
+    const unknownMonth=matchingRecords(data,authorKey,{from:start,to:start+1})
+      .filter(p=>academicStartYear(p)===null).length;
+    const notes=[];
+    if(missingYears.length) notes.push('Missing '+missingYears.join(', '));
+    if(failedYears.length) notes.push('Failed '+failedYears.join(', '));
+    if(unverifiedYears.length) notes.push('Unverified author coverage '+unverifiedYears.join(', '));
+    if(unknownMonth) notes.push(`${unknownMonth} unassigned month${unknownMonth===1?'':'s'}`);
+    const now=new Date();
+    const endAt=new Date(start+1,5,30,23,59,59);
+    const ongoing=now<=endAt;
+    if(ongoing) notes.push('Cycle not yet finished');
+    return {complete:notes.length===0,missingYears,failedYears,unverifiedYears,unknownMonth,ongoing,
+      status:notes.length?notes.join(' · '):'Complete'};
+  }
+  function compareAcademicYears(data,authorKey,fromStart,toStart) {
+    const result=[];
+    for(let start=fromStart;start<=toStart;start++) {
+      const records=matchingAcademicRecords(data,authorKey,start);
+      const stats=summarize(records);
+      const status=academicCycleStatus(data,authorKey,start);
+      const uniqueAuthors=new Set(data.records.filter(p=>academicStartYear(p)===start).map(p=>p.authorKey));
+      result.push({start,end:start+1,label:academicLabel(start),...stats,...status,
+        authorsWithPapers:uniqueAuthors.size});
+    }
+    return result;
+  }
+  function compareAcademicAuthors(data,fromStart,toStart) {
+    return data.authors.map(author=>{
+      const byCycle={},statusByCycle={}; let total=0,citationsKnown=0,q1=0,missingCitations=0;
+      for(let start=fromStart;start<=toStart;start++) {
+        const stats=summarize(matchingAcademicRecords(data,author.key,start));
+        const status=academicCycleStatus(data,author.key,start);
+        byCycle[start]=stats.total;
+        statusByCycle[start]=status;
+        total+=stats.total;citationsKnown+=stats.citationTotal;
+        missingCitations+=stats.citationMissing;q1+=stats.quartiles.Q1;
+      }
+      return {author,byCycle,statusByCycle,total,citationsKnown,missingCitations,q1};
+    }).sort((a,b)=>b.total-a.total||b.q1-a.q1||a.author.name.localeCompare(b.author.name));
+  }
+
+  return {MONTHS,QUARTILES,ingestReports,matchingRecords,summarize,rankAuthors,compareYears,compareAuthors,number,norm,validQuartile,scopusRecordUrl,scopusCitedByUrl,academicStartYear,academicLabel,academicStartOptions,matchingAcademicRecords,academicCycleStatus,compareAcademicYears,compareAcademicAuthors};
 });
