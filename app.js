@@ -72,6 +72,7 @@
     const rows=mock.map(([a,title,date,journal,q,score,doi,my],i)=>({'Author Name':authors[a][0],'Scopus Author ID':authors[a][1], 'Scopus Profile URL':`https://www.scopus.com/authid/detail.uri?authorId=${authors[a][1]}`,
       'Paper Title':title,'DOI':doi,'Publication Date':date,'Publication Month':C.MONTHS[+date.substring(5,7)-1],'Scopus Search Year':Number(date.slice(0,4)),
       'Journal / Source':journal,'Scopus Paper URL':'','Unique Paper Key':'doi:'+doi,'CiteScore':score,'CiteScore Year':my,'Best CiteScore Quartile':q,
+      'Scopus Citation Count':i%4===0?'':(i*3)%27,'Citation Count As Of':'2026-11-03 12:00:00',
       'Highest CiteScore Percentile':{Q1:93,Q2:68,Q3:40,Q4:17,'N/A':''}[q],'Best Subject Category':'Computer Science','Journal Metrics Status':q==='N/A'?'Metric not available':'Complete'}));
     const sm=[];
     for (const year of [2024,2025,2026]) for (const [name,id] of authors) {
@@ -98,6 +99,8 @@
     const notices=[];
     if(state.demo) notices.push('Demonstration data only. All names and publication records are fictional.');
     if(data.missingRecordSheets>0) notices.push(`Warning: ${data.missingRecordSheets} report(s) have no detailed Scopus Records. Counts may be incomplete.`);
+    if(data.records.length && !data.records.some(r=>r.citationCount!==null))
+      notices.push('The uploaded Excel file does not contain Scopus cited-by counts. Generate a fresh report with the updated fetch.py to enable citation analytics.');
     if(data.errors.length)notices.push(`${data.errors.length} retrieval error(s) are recorded in the imported workbook. Review the original Errors worksheet before using these results for evaluation.`);
     if(selected&&selected.status&&!/complete|success|ok|retrieved/i.test(selected.status))notices.push('Author retrieval status: '+selected.status);
     if(selected) for(let y=state.fromYear;y<=state.toYear;y++){
@@ -109,13 +112,18 @@
     const notice=$('dataNotice');notice.hidden=notices.length===0;text(notice,notices.join(' '));
   }
   function renderOverview(){const rec=currentPapers(),s=C.summarize(rec);text($('statTotal'),formatN(s.total));text($('statQ1'),formatN(s.quartiles.Q1));text($('statQ2'),formatN(s.quartiles.Q2));text($('statQ3'),formatN(s.quartiles.Q3));text($('statQ4'),formatN(s.quartiles.Q4));text($('statNA'),formatN(s.quartiles['N/A']));text($('statTotalNote'),state.selectedAuthor?'Author publication records':'Unique papers (co-authorship deduplicated)');
+    text($('statCitations'),s.citationKnown?formatN(s.citationTotal):'N/A');
+    text($('statCitationAvg'),s.meanCitations===null?'N/A':s.meanCitations.toFixed(1));
+    text($('statCitationNote'),s.citationMissing
+      ? `${s.citationMissing} paper(s) missing cited-by counts; total is partial`
+      : 'Current cited-by count across selected papers');
     const chart=$('monthChart');chart.replaceChildren();const vals=C.MONTHS.map(m=>s.months[m]),max=Math.max(1,...vals);
     C.MONTHS.forEach((m,i)=>{const col=document.createElement('div');col.className='month-col';const bar=document.createElement('div');bar.className='month-bar'+(vals[i]===Math.max(...vals)&&vals[i]>0?' highlight':'');bar.style.height=Math.max(2,Math.round(vals[i]/max*93))+'%';bar.title=m+': '+vals[i]+' paper(s)';const val=document.createElement('span');val.className='month-val';text(val,vals[i]);bar.appendChild(val);const lab=document.createElement('span');lab.className='month-label';text(lab,m.slice(0,3));col.append(bar,lab);chart.appendChild(col);});
     const donut=$('quartileDonut'),legend=$('quartileLegend');legend.replaceChildren();text($('donutCenter'),formatN(s.total));let current=0;const slices=[];
     C.QUARTILES.forEach(q=>{const n=s.quartiles[q];const pct=s.total?n/s.total*100:0;const next=current+pct;if(n)slices.push(`${palette[q]} ${current.toFixed(2)}% ${next.toFixed(2)}%`);current=next;const row=document.createElement('div');row.className='legend-line';const dot=document.createElement('i');dot.className='dot '+(q==='N/A'?'qna':q.toLowerCase());const title=document.createElement('span');text(title,q);const num=document.createElement('strong');text(num,formatN(n));row.append(dot,title,num);legend.appendChild(row);});donut.style.background=slices.length?'conic-gradient('+slices.join(',')+')':'#e1e8f0';
     const counts=new Map();for(const p of rec)if(p.journal){const key=C.norm(p.journal);const obj=counts.get(key)||{name:p.journal,count:0};obj.count++;counts.set(key,obj);}const top=Array.from(counts.values()).sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name)).slice(0,6);
     const host=$('topJournals');host.replaceChildren();if(!top.length){const el=document.createElement('div');el.className='empty-state';text(el,'No publication records for this selection.');host.appendChild(el);}for(const x of top){const line=document.createElement('div');line.className='compact-item';const name=document.createElement('span');name.className='item-name';name.title=x.name;text(name,x.name);const count=document.createElement('span');count.className='item-count';text(count,x.count+' papers');line.append(name,count);host.appendChild(line);}
-    const facts=[['Publishing sources',formatN(s.journals)],['Classified Q1–Q4',formatN(s.classified)+' of '+formatN(s.total)],['Highest quartile share',s.classified?(s.quartiles.Q1/s.classified*100).toFixed(1)+'% Q1':'N/A'],['Mean journal CiteScore',s.meanCiteScore===null?'N/A':s.meanCiteScore.toFixed(2)],['Unknown publication month',formatN(s.months.Unknown)],['Selected period',rangeLabel()]];
+    const facts=[['Publishing sources',formatN(s.journals)],['Classified Q1–Q4',formatN(s.classified)+' of '+formatN(s.total)],['Highest quartile share',s.classified?(s.quartiles.Q1/s.classified*100).toFixed(1)+'% Q1':'N/A'],['Mean journal CiteScore',s.meanCiteScore===null?'N/A':s.meanCiteScore.toFixed(2)],['Unknown publication month',formatN(s.months.Unknown)],['Selected period',rangeLabel()],['Scopus citations (known)',s.citationKnown?formatN(s.citationTotal):'N/A'],['Citation count coverage',`${s.citationKnown} / ${s.total} papers`]];
     const container=$('atGlance');container.replaceChildren();for(const [title,val] of facts){const row=document.createElement('div');row.className='fact-row';const a=document.createElement('span');const b=document.createElement('strong');text(a,title);text(b,val);row.append(a,b);container.appendChild(row);}
   }
   function growthText(previous, current, canCompare=true) {
@@ -154,6 +162,8 @@
     years.forEach((y,i)=>{
       const tr=document.createElement('tr');
       makeCell(tr,String(y.year));makeCell(tr,formatN(y.total));
+      makeCell(tr,y.citationKnown?formatN(y.citationTotal):(y.total===0?'0':'N/A'));
+      makeCell(tr,y.meanCitations===null?'N/A':y.meanCitations.toFixed(1));
       const prev=i?years[i-1]:null;
       const growth=growthText(prev?prev.total:null,y.total,Boolean(prev&&!prev.incomplete&&!y.incomplete));
       const g=makeCell(tr,growth);g.className=growthClass(growth);
@@ -165,7 +175,7 @@
     const term=C.norm($('compareAuthorSearch').value);
     const filtered=authorRows.filter(a=>!term||C.norm(a.author.name).includes(term)||a.author.id.includes(term));
     const header=$('compareAuthorsHead');header.replaceChildren();
-    ['Author name',...years.map(y=>String(y.year)),'Period total','First → last'].forEach(t=>makeCell(header,t,'th'));
+    ['Author name',...years.map(y=>String(y.year)),'Period total','Current citations*','First → last'].forEach(t=>makeCell(header,t,'th'));
     const body=$('compareAuthorsRows');body.replaceChildren();
     for(const a of filtered){
       const tr=document.createElement('tr'),cell=makeCell(tr,'');
@@ -173,6 +183,7 @@
       btn.addEventListener('click',()=>selectAuthor(a.author.key));cell.appendChild(btn);
       for(const y of years) {const count=a.byYear[y.year];const c=makeCell(tr,count===null?'⚠ Failed':formatN(count));if(count===null)c.className='year-status';}
       makeCell(tr,formatN(a.total));
+      makeCell(tr,formatN(a.citationTotal));
       const first=a.byYear[years[0].year],last=a.byYear[years.at(-1).year];
       const gtext=growthText(first,last,years.length>1);const g=makeCell(tr,gtext);g.className=growthClass(gtext);body.appendChild(tr);
     }
@@ -183,40 +194,81 @@
     const body=rows.map(y=>{
       const growth=growthText(previous?previous.total:null,y.total,Boolean(previous&&!previous.incomplete&&!y.incomplete));
       previous=y;
-      return [y.year,y.total,growth,...C.QUARTILES.map(q=>y.quartiles[q]),y.incomplete?'INCOMPLETE':'Complete'];
+      return [y.year,y.total,y.citationKnown?y.citationTotal:(y.total===0?0:''),y.citationKnown,y.citationMissing,
+        y.meanCitations===null?'':y.meanCitations.toFixed(2),growth,...C.QUARTILES.map(q=>y.quartiles[q]),
+        y.incomplete?'INCOMPLETE':'Complete'];
     });
     downloadCsv(`Scopus_Yearly_Comparison_${rangeSlug()}.csv`,
-      ['Year','Papers','Growth','Q1','Q2','Q3','Q4','N/A','Retrieval status'],body);
+      ['Year','Papers','Citations Known','Papers With Citation Counts','Papers Missing Citation Counts','Mean Citations','Growth','Q1','Q2','Q3','Q4','N/A','Retrieval status'],body);
   }
   function exportAuthorComparison(){
     const years=comparisonYears(),all=comparisonAuthors();
     downloadCsv(`Scopus_Author_Yearly_Comparison_${rangeSlug()}.csv`,
-      ['Author Name','Scopus Author ID',...years.map(y=>String(y.year)),'Period Total','First-to-Last Growth'],
-      all.map(a=>[a.author.name,a.author.id,...years.map(y=>a.byYear[y.year]??'INCOMPLETE'),a.total,
+      ['Author Name','Scopus Author ID',...years.map(y=>String(y.year)),'Period Total','Current Citations Known','First-to-Last Growth'],
+      all.map(a=>[a.author.name,a.author.id,...years.map(y=>a.byYear[y.year]??'INCOMPLETE'),a.total,a.citationTotal,
          growthText(a.byYear[years[0].year],a.byYear[years.at(-1).year],years.length>1)]));
   }
 
   function filteredPapers(){let rows=currentPapers();const q=C.norm($('paperSearch').value), quartile=$('paperQuartile').value,journal=$('paperJournal').value,sort=$('paperSort').value;
     rows=rows.filter(p=>(!q||[p.title,p.journal,p.doi,p.authorName].some(v=>C.norm(v).includes(q)))&&(!quartile||p.quartile===quartile)&&(!journal||C.norm(p.journal)===journal));
-    rows.sort((a,b)=>{if(sort==='citescore')return (b.citeScore??-1)-(a.citeScore??-1)||String(b.date).localeCompare(String(a.date));if(sort==='title')return a.title.localeCompare(b.title);if(sort==='oldest')return String(a.date).localeCompare(String(b.date));return String(b.date).localeCompare(String(a.date));});return rows;
+    rows.sort((a,b)=>{if(sort==='citations')return (b.citationCount??-1)-(a.citationCount??-1)||String(b.date).localeCompare(String(a.date));if(sort==='citescore')return (b.citeScore??-1)-(a.citeScore??-1)||String(b.date).localeCompare(String(a.date));if(sort==='title')return a.title.localeCompare(b.title);if(sort==='oldest')return String(a.date).localeCompare(String(b.date));return String(b.date).localeCompare(String(a.date));});return rows;
   }
   function updatePaperJournalOptions(){const sel=$('paperJournal'),prev=sel.value;const names=Array.from(new Set(currentPapers().map(x=>x.journal).filter(Boolean))).sort();sel.replaceChildren(new Option('All journals',''));for(const n of names)sel.add(new Option(n,C.norm(n)));sel.value=Array.from(sel.options).some(o=>o.value===prev)?prev:'';}
   function renderPapers(){const rows=filteredPapers(),size=25,pages=Math.max(1,Math.ceil(rows.length/size));state.page=Math.max(1,Math.min(state.page,pages));const visible=rows.slice((state.page-1)*size,state.page*size);
     text($('paperCount'),`Showing ${formatN(visible.length)} of ${formatN(rows.length)} papers`);text($('pageInfo'),state.page+' / '+pages);$('pagePrev').disabled=state.page<=1;$('pageNext').disabled=state.page>=pages;
-    const tbody=$('paperRows');tbody.replaceChildren();if(!visible.length){const tr=document.createElement('tr'),td=makeCell(tr,'No publications match these filters.');td.colSpan=7;td.className='empty-state';tbody.appendChild(tr);return;}
+    const tbody=$('paperRows');tbody.replaceChildren();if(!visible.length){const tr=document.createElement('tr'),td=makeCell(tr,'No publications match these filters.');td.colSpan=8;td.className='empty-state';tbody.appendChild(tr);return;}
     for(const r of visible){const tr=document.createElement('tr');const paper=makeCell(tr,'');const strong=document.createElement('strong');text(strong,r.title);paper.appendChild(strong);const sub=document.createElement('span');sub.className='subline';text(sub,r.doi?'DOI: '+r.doi:r.eid?'Scopus EID: '+r.eid:'No DOI recorded');paper.appendChild(sub);
-      makeCell(tr,state.selectedAuthor?'—':r.authorName);makeCell(tr,r.date||'Unknown');makeCell(tr,r.journal||'Unknown');makeCell(tr,badge(r.quartile));makeCell(tr,r.citeScore===null?'N/A':r.citeScore.toFixed(2));const l=makeCell(tr,'');const links=document.createElement('div');links.className='link-list';if(r.scopusUrl)links.appendChild(makeLink('Scopus ↗',r.scopusUrl));if(r.doiUrl)links.appendChild(makeLink('DOI ↗',r.doiUrl));if(!links.children.length)text(links,'—');l.appendChild(links);tbody.appendChild(tr);}
+      makeCell(tr,state.selectedAuthor?'—':r.authorName);makeCell(tr,r.date||'Unknown');makeCell(tr,r.journal||'Unknown');makeCell(tr,badge(r.quartile));makeCell(tr,r.citeScore===null?'N/A':r.citeScore.toFixed(2));
+      makeCell(tr,r.citationCount===null?'N/A':formatN(r.citationCount));const l=makeCell(tr,'');const links=document.createElement('div');links.className='link-list';if(r.scopusUrl)links.appendChild(makeLink('Scopus ↗',r.scopusUrl));
+      if(r.citedByUrl)links.appendChild(makeLink('Cited by ↗',r.citedByUrl));if(r.doiUrl)links.appendChild(makeLink('DOI ↗',r.doiUrl));if(!links.children.length)text(links,'—');l.appendChild(links);tbody.appendChild(tr);}
   }
-  function renderAuthors(){const q=C.norm($('rankingSearch').value);const ranking=filteredRank().filter(x=>!q||C.norm(x.author.name).includes(q)||x.author.id.includes(q));text($('rankingCount'),`${formatN(ranking.length)} author(s)`);const tbody=$('authorRows');tbody.replaceChildren();if(!ranking.length){const tr=document.createElement('tr'),td=makeCell(tr,'No matching authors.');td.colSpan=9;td.className='empty-state';tbody.appendChild(tr);return;}
-    ranking.forEach((r,i)=>{const tr=document.createElement('tr');makeCell(tr,i+1);const td=makeCell(tr,'');const name=document.createElement('button');name.type='button';name.className='rank-name';text(name,r.author.name);name.addEventListener('click',()=>{selectAuthor(r.author.key);switchTab('overview');window.scrollTo({top:0,behavior:'smooth'});});td.appendChild(name);makeCell(tr,r.total);for(const q of C.QUARTILES)makeCell(tr,r.quartiles[q]);makeCell(tr,r.author.profile?makeLink('View ↗',r.author.profile):'—');tbody.appendChild(tr);});
+  function renderAuthors(){const q=C.norm($('rankingSearch').value);const ranking=filteredRank().filter(x=>!q||C.norm(x.author.name).includes(q)||x.author.id.includes(q));text($('rankingCount'),`${formatN(ranking.length)} author(s)`);const tbody=$('authorRows');tbody.replaceChildren();if(!ranking.length){const tr=document.createElement('tr'),td=makeCell(tr,'No matching authors.');td.colSpan=10;td.className='empty-state';tbody.appendChild(tr);return;}
+    ranking.forEach((r,i)=>{const tr=document.createElement('tr');makeCell(tr,i+1);const td=makeCell(tr,'');const name=document.createElement('button');name.type='button';name.className='rank-name';text(name,r.author.name);name.addEventListener('click',()=>{selectAuthor(r.author.key);switchTab('overview');window.scrollTo({top:0,behavior:'smooth'});});td.appendChild(name);makeCell(tr,r.total);makeCell(tr,r.citationKnown?formatN(r.citationTotal):(r.total===0?'0':'N/A'));for(const q of C.QUARTILES)makeCell(tr,r.quartiles[q]);makeCell(tr,r.author.profile?makeLink('View ↗',r.author.profile):'—');tbody.appendChild(tr);});
   }
   function journalStatistics(){const rows=currentPapers(),map=new Map();for(const r of rows){const key=r.sourceId||C.norm(r.journal||'Unknown'),m=map.get(key)||{journal:r.journal||'Unknown',sourceId:r.sourceId,issn:r.issn,count:0,score:null,year:null,pct:null,quartile:'N/A',category:'',link:r.sourceUrl};m.count++;if(r.citeScore!==null&&(m.score===null||(r.citeScoreYear||0)>=(m.year||0))){m.score=r.citeScore;m.year=r.citeScoreYear;m.pct=r.percentile;m.quartile=r.quartile;m.category=r.category;m.link=r.sourceUrl||m.link;}else if(m.quartile==='N/A'&&r.quartile!=='N/A'){m.quartile=r.quartile;m.category=r.category;m.pct=r.percentile;}map.set(key,m);}return Array.from(map.values()).sort((a,b)=>b.count-a.count||a.journal.localeCompare(b.journal));}
   function filteredJournals(){const q=C.norm($('journalSearch').value),quartile=$('journalQuartile').value;return journalStatistics().filter(j=>(!q||[j.journal,j.category,j.issn].some(x=>C.norm(x).includes(q)))&&(!quartile||j.quartile===quartile));}
   function renderJournals(){const rows=filteredJournals(),tbody=$('journalRows');tbody.replaceChildren();text($('journalCount'),`${formatN(rows.length)} sources shown`);if(!rows.length){const tr=document.createElement('tr');const td=makeCell(tr,'No journals match these filters.');td.colSpan=7;td.className='empty-state';tbody.appendChild(tr);return;}for(const j of rows){const tr=document.createElement('tr');const td=makeCell(tr,'');const name=document.createElement('strong');text(name,j.journal);td.appendChild(name);if(j.link){const line=document.createElement('span');line.className='subline';line.appendChild(makeLink('Scopus source ↗',j.link));td.appendChild(line);}makeCell(tr,j.count);makeCell(tr,j.score===null?'N/A':j.score.toFixed(2));makeCell(tr,j.year||'—');makeCell(tr,j.pct===null?'N/A':j.pct+'th');makeCell(tr,badge(j.quartile));makeCell(tr,j.category||'—');tbody.appendChild(tr);}}
-  function renderAll(){renderContext();renderDirectory();renderOverview();renderComparison();updatePaperJournalOptions();renderPapers();renderAuthors();renderJournals();}
+
+  function renderCitations(){
+    const rows=currentPapers(),s=C.summarize(rows),years=comparisonYears();
+    text($('citationTotal'),s.citationKnown?formatN(s.citationTotal):'N/A');
+    text($('citationCoverage'),`${formatN(s.citationKnown)} / ${formatN(s.total)}`);
+    text($('citationMissing'),`${formatN(s.citationMissing)} paper(s) missing a citation count`);
+    text($('citationAverage'),s.meanCitations===null?'N/A':s.meanCitations.toFixed(2));
+    text($('citationCitedPapers'),s.citationKnown?formatN(s.citedPapers):'N/A');
+    text($('citationHIndex'),s.citationKnown?formatN(s.hIndex):'N/A');
+    const chart=$('citationYearChart');chart.replaceChildren();
+    const max=Math.max(1,...years.map(y=>y.citationTotal));
+    for(const y of years){
+      const col=document.createElement('div');col.className='year-chart-column';
+      const bar=document.createElement('div');bar.className='year-chart-bar'+(y.incomplete?' incomplete':'');
+      const value=y.citationKnown?y.citationTotal:(y.total===0?0:null);
+      bar.style.height=`${Math.max(2,Math.round((value||0)/max*92))}%`;
+      bar.title=`${y.year}: ${value===null?'No citation counts available':formatN(value)+' current citations'} (${y.citationKnown}/${y.total} paper counts known)`;
+      const val=document.createElement('span');val.className='year-chart-value';text(val,value===null?'N/A':formatN(value));bar.appendChild(val);
+      const lab=document.createElement('span');lab.className='year-chart-label';text(lab,String(y.year));
+      col.append(bar,lab);chart.appendChild(col);
+    }
+    const facts=[['Citation snapshot',rows.map(r=>r.citationAsOf).filter(Boolean).sort().at(-1)||'Not included in file'],
+      ['Selected publication years',rangeLabel()],['Citation data coverage',`${s.citationKnown} / ${s.total} papers`],
+      ['Institutional counting',state.selectedAuthor?'Author papers (shared papers count under this author)':'Unique papers (no coauthor duplication)'],
+      ['Definition','Cumulative cited-by counts as of retrieval, grouped by publication year'],
+      ['Attribution','Citation counts from Scopus. Open Cited by to see citing records']];
+    const panel=$('citationFacts');panel.replaceChildren();for(const [key,value] of facts){const line=document.createElement('div');line.className='fact-row';const a=document.createElement('span');const b=document.createElement('strong');text(a,key);text(b,value);line.append(a,b);panel.appendChild(line);}
+    const table=$('citationPaperRows');table.replaceChildren();
+    const ranked=rows.filter(r=>r.citationCount!==null).sort((a,b)=>b.citationCount-a.citationCount||b.year-a.year).slice(0,40);
+    if(!ranked.length){const tr=document.createElement('tr');const td=makeCell(tr,'No citation counts available in this report. Re-run the latest fetch.py to include Scopus cited-by counts.');td.colSpan=6;td.className='empty-state';table.appendChild(tr);}
+    for(const p of ranked){const tr=document.createElement('tr');const cell=makeCell(tr,'');const title=document.createElement('strong');text(title,p.title);cell.append(title);makeCell(tr,p.year||'—');makeCell(tr,state.selectedAuthor?'—':p.authorName);makeCell(tr,p.journal||'—');makeCell(tr,formatN(p.citationCount));makeCell(tr,p.citedByUrl?makeLink('Cited by ↗',p.citedByUrl):'—');table.appendChild(tr);}
+  }
+  function exportCitations(){
+    downloadCsv(`Scopus_Citation_Details_${rangeSlug()}.csv`,
+      ['Publication Year','Author','Paper Title','Journal','Scopus Citation Count','Citation As Of','Scopus Cited By URL','Scopus Record URL','DOI'],
+      currentPapers().map(p=>[p.year,p.authorName,p.title,p.journal,p.citationCount??'',p.citationAsOf,p.citedByUrl,p.scopusUrl,p.doi]));
+  }
+  function renderAll(){renderContext();renderDirectory();renderOverview();renderComparison();renderCitations();updatePaperJournalOptions();renderPapers();renderAuthors();renderJournals();}
   function switchTab(tab){state.tab=tab;document.querySelectorAll('.tab').forEach(el=>{const active=el.dataset.tab===tab;el.classList.toggle('active',active);el.setAttribute('aria-selected',String(active));});document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!=='view-'+tab);}
-  function exportSummary(){const data=state.data, rows=C.rankAuthors(data,selectedRange()).map(x=>[x.author.name,x.author.profile,x.total,...C.QUARTILES.map(q=>x.quartiles[q]),x.author.status]);downloadCsv(`Scopus_Author_Summary_${rangeSlug()}.csv`,['Author Name','Scopus Profile URL','Papers in selected range','Q1','Q2','Q3','Q4','N/A','Retrieval Status'],rows);}
-  function exportPapers(){downloadCsv(`Scopus_Papers_${rangeSlug()}_${state.selectedAuthor?'author':'institute'}.csv`,['Author Name','Paper Title','Publication Date','Month','Journal','CiteScore','CiteScore Year','Quartile','Highest Percentile','DOI','Scopus URL'],filteredPapers().map(p=>[p.authorName,p.title,p.date,p.month,p.journal,p.citeScore??'',p.citeScoreYear??'',p.quartile,p.percentile??'',p.doi,p.scopusUrl]));}
+  function exportSummary(){const data=state.data, rows=C.rankAuthors(data,selectedRange()).map(x=>[x.author.name,x.author.profile,x.total,x.citationKnown?x.citationTotal:'',x.citationMissing,...C.QUARTILES.map(q=>x.quartiles[q]),x.author.status]);downloadCsv(`Scopus_Author_Summary_${rangeSlug()}.csv`,['Author Name','Scopus Profile URL','Papers in selected range','Citations Known','Missing Citation Counts','Q1','Q2','Q3','Q4','N/A','Retrieval Status'],rows);}
+  function exportPapers(){downloadCsv(`Scopus_Papers_${rangeSlug()}_${state.selectedAuthor?'author':'institute'}.csv`,['Author Name','Paper Title','Publication Date','Month','Journal','CiteScore','CiteScore Year','Scopus Citation Count','Scopus Cited By URL','Citation Count As Of','Quartile','Highest Percentile','DOI','Scopus URL'],filteredPapers().map(p=>[p.authorName,p.title,p.date,p.month,p.journal,p.citeScore??'',p.citeScoreYear??'',p.citationCount??'',p.citedByUrl,p.citationAsOf,p.quartile,p.percentile??'',p.doi,p.scopusUrl]));}
   function exportJournals(){downloadCsv('Scopus_Journal_Metrics.csv',['Journal','Papers','CiteScore','Metric Year','Highest Percentile','Quartile','Best Category','Source URL'],filteredJournals().map(x=>[x.journal,x.count,x.score??'',x.year??'',x.pct??'',x.quartile,x.category,x.link]));}
   function setup(){for(const id of ['xlsxInput','welcomeInput'])$(id).addEventListener('change',e=>parseFiles(e.target.files));
     for(const id of ['demoBtn','welcomeDemo'])$(id).addEventListener('click',()=>loadReports(demoReports(),true));
@@ -240,7 +292,7 @@
     for(const id of ['paperSearch','paperQuartile','paperJournal','paperSort'])$(id).addEventListener(id==='paperSearch'?'input':'change',()=>{state.page=1;renderPapers();});
     $('pagePrev').addEventListener('click',()=>{state.page--;renderPapers();});$('pageNext').addEventListener('click',()=>{state.page++;renderPapers();});
     $('compareAuthorSearch').addEventListener('input',renderComparison);$('rankingSearch').addEventListener('input',renderAuthors);$('journalSearch').addEventListener('input',renderJournals);$('journalQuartile').addEventListener('change',renderJournals);
-    $('exportYearComparison').addEventListener('click',exportYearComparison);$('exportAuthorComparison').addEventListener('click',exportAuthorComparison);$('exportSummaryBtn').addEventListener('click',exportSummary);$('exportAuthors').addEventListener('click',exportSummary);$('exportPapers').addEventListener('click',exportPapers);$('exportJournals').addEventListener('click',exportJournals);
+    $('exportCitations').addEventListener('click',exportCitations);$('exportYearComparison').addEventListener('click',exportYearComparison);$('exportAuthorComparison').addEventListener('click',exportAuthorComparison);$('exportSummaryBtn').addEventListener('click',exportSummary);$('exportAuthors').addEventListener('click',exportSummary);$('exportPapers').addEventListener('click',exportPapers);$('exportJournals').addEventListener('click',exportJournals);
     window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer?.files?.length)parseFiles(e.dataTransfer.files);});
   }
   setup();
