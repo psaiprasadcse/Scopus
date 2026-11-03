@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101f38">
-  <meta name="description" content="Interactive Scopus faculty publication dashboard from local Excel reports. Compare 2024–2026 Scopus publications by institution and faculty, including Q1–Q4 and monthly trends.">
+  <meta name="description" content="Interactive Scopus faculty publication dashboard from local Excel reports. Compare calendar years and July–June academic years across institutions and faculty, including citations, Q1–Q4 and monthly trends.">
   <title>Scopus Research Insights | Faculty Publications</title>
   <link rel="stylesheet" href="styles.css">
   <script defer src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
@@ -24,8 +24,8 @@
     <section class="welcome" id="welcomePanel">
       <div class="welcome-copy">
         <span class="eyebrow">FACULTY RESEARCH INTELLIGENCE</span>
-        <h1>Understand every publication.<br><span>Compare every research year.</span></h1>
-        <p>Upload a single multi-year Excel report produced by the updated Scopus program, or several annual reports. Compare publications, Scopus citations and CiteScore quartiles year by year—across the institution or for any individual researcher.</p>
+        <h1>Understand every publication.<br><span>Compare calendar and academic years.</span></h1>
+        <p>Upload a single multi-year Excel report produced by the updated Scopus program, or several annual reports. Compare calendar years and July–June academic cycles for institutional totals and individual authors, including citations and CiteScore quartiles.</p>
         <div class="welcome-actions"><label class="btn primary large" for="welcomeInput">Choose Excel report <input id="welcomeInput" type="file" accept=".xlsx,.xls" multiple hidden></label><button class="btn outline large" id="welcomeDemo" type="button">Explore with demo data</button></div>
         <div class="mini-features"><span>✓ No API key required</span><span>✓ GitHub Pages ready</span><span>✓ No report stored on GitHub</span></div>
       </div>
@@ -47,7 +47,8 @@
         <div class="notice" id="dataNotice" role="status" hidden></div>
         <div class="tabs" role="tablist" aria-label="Dashboard sections">
           <button role="tab" class="tab active" aria-selected="true" data-tab="overview">Overview</button>
-          <button role="tab" class="tab" aria-selected="false" data-tab="comparison">Year comparison</button>
+          <button role="tab" class="tab" aria-selected="false" data-tab="comparison">Calendar-year comparison</button>
+          <button role="tab" class="tab" aria-selected="false" data-tab="academic">Academic-year comparison</button>
           <button role="tab" class="tab" aria-selected="false" data-tab="citations">Citations</button>
           <button role="tab" class="tab" aria-selected="false" data-tab="papers">Publications</button>
           <button role="tab" class="tab" aria-selected="false" data-tab="authors">Author ranking</button>
@@ -76,6 +77,34 @@
           <article class="panel"><div class="panel-header"><div><h2>Yearly publication and quartile statistics</h2><p>Growth compares each year with the previous year in the selected range; incomplete years are flagged</p></div></div><div class="table-wrap"><table><thead><tr><th>Year</th><th>Papers</th><th>Citations*</th><th>Mean cites</th><th>Growth</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>N/A</th><th>Retrieval</th></tr></thead><tbody id="yearCompareRows"></tbody></table></div></article>
           <article class="panel author-compare-panel"><div class="panel-header"><div><h2>Author-by-author year comparison</h2><p>One author at a time in the main charts; all faculty below for side-by-side comparison</p></div><button class="btn outline small" id="exportAuthorComparison" type="button">↓ Download author comparison</button></div><div class="toolbar"><input id="compareAuthorSearch" type="search" placeholder="Find faculty in comparison table…" autocomplete="off"></div><div class="table-wrap"><table><thead><tr id="compareAuthorsHead"></tr></thead><tbody id="compareAuthorsRows"></tbody></table></div><div class="table-footer"><span id="compareAuthorsCount"></span></div></article>
           <p class="comparison-footnote">Important: Q1–Q4 use the latest completed CiteScore metric returned during retrieval, even for earlier publication years. These are not necessarily the historical quartiles that applied in each publication year. A failed API query is marked incomplete, not zero.</p>
+        </section>
+        <section class="view" id="view-academic" hidden>
+          <div class="comparison-intro">
+            <div><span class="eyebrow">HIGHER EDUCATION · JULY TO JUNE</span><h2 id="academicTitle">Institution academic-year comparison</h2><p id="academicSubtitle">A.Y. 2024–25 covers 1 July 2024 to 30 June 2025 (publication cover dates).</p></div>
+            <button class="btn outline small" id="exportAcademicComparison" type="button">↓ Export academic years</button>
+          </div>
+          <div class="academic-filter-bar">
+            <div class="field"><label for="academicFrom">From academic year</label><select id="academicFrom" aria-label="Academic year from"></select></div>
+            <div class="field"><label for="academicTo">To academic year</label><select id="academicTo" aria-label="Academic year to"></select></div>
+            <div class="academic-range-buttons"><button class="btn outline small" id="academicLast2" type="button">Last 2 complete cycles</button><button class="btn outline small" id="academicAll" type="button">All available cycles</button></div>
+          </div>
+          <div class="academic-info" id="academicCoverageNote" role="status">Academic-year data coverage will appear here.</div>
+          <div class="stats-grid academic-stats">
+            <article class="stat-card main-stat"><span>Academic-period papers</span><strong id="academicPaperTotal">0</strong><small>Institutional unique / selected author</small></article>
+            <article class="stat-card"><span>Citations (known)</span><strong id="academicCitations">—</strong><small>Cumulative citations of papers in period</small></article>
+            <article class="stat-card"><span><i class="dot q1"></i> Q1 publications</span><strong id="academicQ1">0</strong><small>Latest completed CiteScore snapshot</small></article>
+            <article class="stat-card"><span>Q1 share (classified)</span><strong id="academicQ1Share">—</strong><small>Percentage of Q1 among Q1–Q4 papers</small></article>
+            <article class="stat-card"><span>Complete academic cycles</span><strong id="academicCompleteCycles">0</strong><small>Both calendar years verified and fully elapsed</small></article>
+            <article class="stat-card"><span>First-to-last growth</span><strong id="academicGrowth">—</strong><small>Computed only for complete cycles</small></article>
+          </div>
+          <div class="chart-grid">
+            <article class="panel"><div class="panel-header"><div><h2>Publications per academic year</h2><p>July 1–June 30, institutional records deduplicated</p></div><span class="panel-tag" id="academicPeriodLabel">ACADEMIC YEARS</span></div><div id="academicTrendChart" class="year-chart" aria-label="Academic-year paper counts"></div></article>
+            <article class="panel"><div class="panel-header"><div><h2>Q1–Q4 by academic year</h2><p>Best reported CiteScore quartile, including N/A</p></div></div><div id="academicQuartileChart" class="year-qchart"></div><div class="comparison-legend"><span><i class="dot q1"></i>Q1</span><span><i class="dot q2"></i>Q2</span><span><i class="dot q3"></i>Q3</span><span><i class="dot q4"></i>Q4</span><span><i class="dot qna"></i>N/A</span></div></article>
+          </div>
+          <article class="panel"><div class="panel-header"><div><h2>July–June publication pattern</h2><p id="academicMonthCaption">Latest selected academic year; count by publication month</p></div></div><div class="month-chart" id="academicMonthChart" aria-label="July through June monthly publications"></div></article>
+          <article class="panel academic-table-panel"><div class="panel-header"><div><h2>Academic-year publication and citation statistics</h2><p>Growth is suppressed when either academic cycle is partial or has retrieval/date issues.</p></div></div><div class="table-wrap"><table><thead><tr><th>Academic year</th><th>Unique papers / author papers</th><th>Current cites*</th><th>Mean cites</th><th>Growth</th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>N/A</th><th>Unknown months†</th><th>Data status</th></tr></thead><tbody id="academicYearRows"></tbody></table></div></article>
+          <article class="panel author-compare-panel"><div class="panel-header"><div><h2>Faculty-wise academic-year comparison</h2><p>Click a researcher to update the academic charts; one paper may count for more than one co-author.</p></div><button class="btn outline small" id="exportAcademicAuthors" type="button">↓ Export author academic comparison</button></div><div class="toolbar"><input id="academicAuthorSearch" type="search" placeholder="Search faculty name or Scopus author ID…" autocomplete="off"></div><div class="table-wrap"><table><thead><tr id="academicAuthorsHead"></tr></thead><tbody id="academicAuthorsRows"></tbody></table></div><div class="table-footer"><span id="academicAuthorsCount"></span></div></article>
+          <p class="comparison-footnote"><strong>Academic year definition:</strong> 1 July to 30 June. A paper belongs to the cycle determined by its <strong>publication cover month</strong>, not its Scopus indexing date. †Unknown-month papers cannot be assigned reliably to a July–June cycle; the warning shows records in its two calendar years that need review, not added papers. An incomplete cycle may lack a calendar-year report, include an API retrieval error, or still be in progress. Citations are current cumulative counts for papers in each cycle, not citations received during that cycle. Journal Q1–Q4 uses the report's latest completed CiteScore snapshot, not necessarily the historical quartile.</p>
         </section>
         <section class="view" id="view-citations" hidden>
           <div class="comparison-intro"><div><span class="eyebrow">SCOPUS CITED-BY ANALYTICS</span><h2>Citation impact by publication year</h2><p>Current citation counts for papers published in each selected year, not citations received within that year.</p></div><button class="btn outline small" type="button" id="exportCitations">↓ Export citations CSV</button></div>
