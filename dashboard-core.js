@@ -54,6 +54,16 @@
     } catch (_) { /* no valid web page fallback */ }
     return '';
   }
+  function scopusCitedByUrl(eid, originalUrl) {
+    const r = scopusRecordUrl(eid, originalUrl);
+    const match = r.match(/[?&]scp=(\d{6,20})(?:&|$)/);
+    if (match) return `https://www.scopus.com/inward/citedby.url?partnerID=HzOxMe3b&scp=${match[1]}&origin=inward`;
+    try {
+      const u=new URL(String(originalUrl||''));
+      if (u.protocol==='https:' && (u.hostname==='www.scopus.com'||u.hostname==='scopus.com') && u.pathname==='/inward/citedby.url') return u.toString();
+    } catch (_) { }
+    return '';
+  }
   const yearOf = (...candidates) => {
     for (const v of candidates) {
       const m = String(v || '').match(/(?:^|\D)((?:19|20)\d{2})(?:\D|$)/);
@@ -139,11 +149,28 @@
         const entry={authorKey,authorName:authors.get(authorKey).name,title,doi,eid,date,year,month:asMonth(value(row,'Publication Month'),date),
           journal:value(row,'Journal / Source'),sourceId:value(row,'Scopus Source ID'),issn:value(row,'ISSN','eISSN'),
           type:value(row,'Source Type'),scopusUrl:scopusRecordUrl(eid,value(row,'Scopus Paper URL')),doiUrl:value(row,'DOI URL')||(doi?'https://doi.org/'+doi:''),
-          paperKey,citeScore:number(value(row,'CiteScore')),citeScoreYear:number(value(row,'CiteScore Year')),
+          paperKey,citationCount:number(value(row,'Scopus Citation Count','Citation Count','Cited By Count','citedby-count')),
+          citedByUrl:scopusCitedByUrl(eid,value(row,'Scopus Cited By URL')),
+          citationAsOf:value(row,'Citation Count As Of'),
+          citeScore:number(value(row,'CiteScore')),citeScoreYear:number(value(row,'CiteScore Year')),
           percentile:number(value(row,'Highest CiteScore Percentile')),quartile:validQuartile(value(row,'Best CiteScore Quartile')),
           category:value(row,'Best Subject Category'),metricStatus:value(row,'Journal Metrics Status'),sourceUrl:value(row,'Scopus Source URL')};
         const existing=records.get(uniqueRecordKey);
-        if(!existing || (existing.quartile==='N/A' && entry.quartile!=='N/A')) records.set(uniqueRecordKey,entry);
+        if(!existing) records.set(uniqueRecordKey,entry);
+        else {
+          // Prefer the latest citation snapshot, retaining known values over blank ones.
+          const newer = entry.citationAsOf && (!existing.citationAsOf || entry.citationAsOf >= existing.citationAsOf);
+          const betterCites = existing.citationCount===null && entry.citationCount!==null;
+          if (entry.citationCount!==null && (betterCites || (newer && existing.citationCount!==null))) {
+            existing.citationCount=entry.citationCount;
+            existing.citationAsOf=entry.citationAsOf;
+          }
+          existing.citedByUrl ||= entry.citedByUrl;
+          if (existing.quartile==='N/A' && entry.quartile!=='N/A') {
+            existing.quartile=entry.quartile;existing.citeScore=entry.citeScore;
+            existing.citeScoreYear=entry.citeScoreYear;existing.percentile=entry.percentile;
+          }
+        }
       }
       for(const row of (sheets.Errors||[])) if(value(row,'Issue')) errors.push({author:value(row,'Author'),stage:value(row,'Stage'),issue:value(row,'Issue'),file:report.name});
       if (reportYear) years.add(reportYear);
@@ -183,7 +210,16 @@
     for(const p of matched) {
       const key=String(p.year)+'|'+p.paperKey;
       const old=seen.get(key);
-      if(!old || (old.quartile==='N/A' && p.quartile!=='N/A')) seen.set(key,p);
+      if(!old) seen.set(key,{...p});
+      else {
+        // Coauthored paper counts are institutionally counted once. Reconcile
+        // citation counts from the newest available snapshot of its author rows.
+        if (p.citationCount!==null && (old.citationCount===null || (p.citationAsOf||'')>(old.citationAsOf||''))) {
+          old.citationCount=p.citationCount;old.citationAsOf=p.citationAsOf;
+        }
+        old.citedByUrl ||= p.citedByUrl;
+        if (old.quartile==='N/A' && p.quartile!=='N/A') old.quartile=p.quartile;
+      }
     }
     return Array.from(seen.values());
   }
@@ -191,14 +227,25 @@
     const months=Object.fromEntries([...MONTHS,'Unknown'].map(m=>[m,0]));
     const quartiles=Object.fromEntries(QUARTILES.map(q=>[q,0]));
     const journals=new Set(); let scoreSum=0,scoreCount=0;
+    let citationTotal=0,citationKnown=0,citationMissing=0,citedPapers=0,maxCitations=0;
+    const knownCounts=[];
     for(const p of records) {
       months[p.month in months?p.month:'Unknown']++;
       quartiles[p.quartile in quartiles?p.quartile:'N/A']++;
       if(p.journal) journals.add(norm(p.journal));
       if(p.citeScore!==null) {scoreSum+=p.citeScore;scoreCount++;}
+      if (p.citationCount!==null) {
+        citationTotal+=p.citationCount;citationKnown++;
+        if (p.citationCount>0) citedPapers++;
+        maxCitations=Math.max(maxCitations,p.citationCount);
+        knownCounts.push(p.citationCount);
+      } else citationMissing++;
     }
+    knownCounts.sort((a,b)=>b-a);
+    const hIndex=knownCounts.reduce((acc,n,i)=>n>=i+1?i+1:acc,0);
     return {total:records.length,months,quartiles,journals:journals.size,meanCiteScore:scoreCount?scoreSum/scoreCount:null,
-      classified:records.length-quartiles['N/A']};
+      classified:records.length-quartiles['N/A'],citationTotal,citationKnown,citationMissing,citedPapers,maxCitations,
+      meanCitations:citationKnown?citationTotal/citationKnown:null,hIndex};
   }
   function rankAuthors(data,yearOrRange) {
     return data.authors.map(a=>({author:a,...summarize(matchingRecords(data,a.key,yearOrRange))}))
@@ -218,16 +265,20 @@
   }
   function compareAuthors(data,from,to) {
     return data.authors.map(author=>{
-      const byYear={};let total=0;
+      const byYear={},citationsByYear={},citationMissingByYear={};let total=0,citationTotal=0;
       for(let year=from;year<=to;year++) {
         const status=author.statusByYear.get(year)||'';
         const isFailed=/^(error|cancelled|incomplete)/i.test(status);
         const count=isFailed?null:matchingRecords(data,author.key,year).length;
         byYear[year]=count;
+        const s=summarize(matchingRecords(data,author.key,year));
+        citationsByYear[year]=isFailed?null:s.citationKnown?s.citationTotal:(s.total===0?0:null);
+        citationMissingByYear[year]=s.citationMissing;
         if(count!==null) total+=count;
+        if(!isFailed) citationTotal+=s.citationTotal;
       }
-      return {author,byYear,total};
+      return {author,byYear,total,citationsByYear,citationMissingByYear,citationTotal};
     }).sort((a,b)=>b.total-a.total||a.author.name.localeCompare(b.author.name));
   }
-  return {MONTHS,QUARTILES,ingestReports,matchingRecords,summarize,rankAuthors,compareYears,compareAuthors,number,norm,validQuartile,scopusRecordUrl};
+  return {MONTHS,QUARTILES,ingestReports,matchingRecords,summarize,rankAuthors,compareYears,compareAuthors,number,norm,validQuartile,scopusRecordUrl,scopusCitedByUrl};
 });
