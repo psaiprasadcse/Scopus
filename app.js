@@ -3,7 +3,7 @@
   'use strict';
   const C=window.ScopusDashboardCore;
   const $=id=>document.getElementById(id);
-  const state={data:null,selectedAuthor:null,fromYear:null,toYear:null,tab:'overview',page:1,loadedNames:[],demo:false};
+  const state={data:null,selectedAuthor:null,fromYear:null,toYear:null,academicFrom:null,academicTo:null,tab:'overview',page:1,loadedNames:[],demo:false};
   let toastTimer;
   const palette={Q1:'#178c85',Q2:'#597bd4',Q3:'#e6a64e',Q4:'#cf7087','N/A':'#b7bfcd'};
   const formatN=v=>Number(v||0).toLocaleString('en-IN');
@@ -30,6 +30,7 @@
       if(!data.years.length) throw Error('No publication years were found in the uploaded report.');
       for(const id of ['yearFrom','yearTo']) {const sel=$(id);sel.replaceChildren();for(const y of [...data.years].sort((a,b)=>a-b))sel.add(new Option(String(y),String(y)));}
       $('yearFrom').value=String(state.fromYear);$('yearTo').value=String(state.toYear);
+      initializeAcademicControls();
       $('welcomePanel').hidden=true;$('dashboard').hidden=false;$('authorSearch').value='';$('rankingSearch').value='';$('paperSearch').value='';$('journalSearch').value='';
       document.querySelectorAll('.tab').forEach(x=>{x.classList.toggle('active',x.dataset.tab==='overview');x.setAttribute('aria-selected',String(x.dataset.tab==='overview'));});
       document.querySelectorAll('.view').forEach(x=>x.hidden=x.id!=='view-overview');
@@ -265,7 +266,142 @@
       ['Publication Year','Author','Paper Title','Journal','Scopus Citation Count','Citation As Of','Scopus Cited By URL','Scopus Record URL','DOI'],
       currentPapers().map(p=>[p.year,p.authorName,p.title,p.journal,p.citationCount??'',p.citationAsOf,p.citedByUrl,p.scopusUrl,p.doi]));
   }
-  function renderAll(){renderContext();renderDirectory();renderOverview();renderComparison();renderCitations();updatePaperJournalOptions();renderPapers();renderAuthors();renderJournals();}
+  // Academic-year analytics: July 1 in start year through June 30 in the following year.
+  const academicMonths=['July','August','September','October','November','December','January','February','March','April','May','June'];
+  function academicRanges() {return C.compareAcademicYears(state.data,state.selectedAuthor,state.academicFrom,state.academicTo);}
+  function academicRangeSlug(){return `AY_${state.academicFrom}_${state.academicTo+1}`;}
+  function academicRangeTitle(){return state.academicFrom===state.academicTo?C.academicLabel(state.academicFrom):`${C.academicLabel(state.academicFrom)} to ${C.academicLabel(state.academicTo)}`;}
+  function initializeAcademicControls(){
+    const starts=C.academicStartOptions(state.data);
+    const full=starts.filter(y=>state.data.years.includes(y)&&state.data.years.includes(y+1));
+    state.academicFrom=full.length?full[0]:starts[0];
+    state.academicTo=full.length?full.at(-1):starts.at(-1);
+    for (const id of ['academicFrom','academicTo']) {
+      const sel=$(id);sel.replaceChildren();
+      for (const y of starts) {
+        const covered=state.data.years.includes(y)&&state.data.years.includes(y+1);
+        sel.add(new Option(`A.Y. ${C.academicLabel(y)}${covered?'':' (partial year data)'}`,String(y)));
+      }
+    }
+    $('academicFrom').value=String(state.academicFrom);
+    $('academicTo').value=String(state.academicTo);
+    $('academicAuthorSearch').value='';
+  }
+  function setAcademicYears(from,to){
+    const starts=C.academicStartOptions(state.data);
+    const lo=starts[0],hi=starts.at(-1);
+    state.academicFrom=Math.max(lo,Math.min(Number(from),hi));
+    state.academicTo=Math.max(state.academicFrom,Math.min(Number(to),hi));
+    $('academicFrom').value=String(state.academicFrom);
+    $('academicTo').value=String(state.academicTo);
+    renderAcademic();
+  }
+  function academicGrowth(previous,current) {
+    return growthText(previous?.total??null,current.total,
+      Boolean(previous&&previous.complete&&current.complete));
+  }
+  function renderAcademic(){
+    if(!state.data||state.academicFrom===null)return;
+    const selected=authorByKey(state.selectedAuthor),cycles=academicRanges();
+    const records=C.matchingAcademicRecords(state.data,state.selectedAuthor,state.academicFrom,state.academicTo);
+    const stats=C.summarize(records);
+    const classified=stats.classified;
+    text($('academicTitle'),selected?`${selected.name} — academic-year research`: 'Institution-wide academic-year research');
+    text($('academicSubtitle'),selected?'Research publications and citation impact for July–June academic years.':'Unique institutional papers by July–June academic years; coauthored papers counted once.');
+    text($('academicPeriodLabel'),academicRangeTitle());
+    text($('academicPaperTotal'),formatN(stats.total));
+    text($('academicCitations'),stats.citationKnown?formatN(stats.citationTotal):'N/A');
+    text($('academicQ1'),formatN(stats.quartiles.Q1));
+    text($('academicQ1Share'),classified?(100*stats.quartiles.Q1/classified).toFixed(1)+'%':'N/A');
+    text($('academicCompleteCycles'),`${cycles.filter(x=>x.complete).length} / ${cycles.length}`);
+    const first=cycles[0],last=cycles.at(-1);
+    text($('academicGrowth'),cycles.length>1?academicGrowth(first,last):'—');
+    const partial=cycles.filter(x=>!x.complete);
+    const coverageMsg=partial.length
+      ?`${cycles.length-partial.length} of ${cycles.length} academic cycles have full, verified coverage. Review ${partial.map(x=>`${x.label}: ${x.status}`).join(' | ')}. Partial totals are displayed but cannot be used as complete-year comparisons.`
+      :`Full July–June coverage for ${academicRangeTitle()}. Academic-period calculations are independent of the calendar-year filters.`;
+    text($('academicCoverageNote'),coverageMsg);
+    const chart=$('academicTrendChart'),quart=$('academicQuartileChart');chart.replaceChildren();quart.replaceChildren();
+    const max=Math.max(1,...cycles.map(x=>x.total));
+    for(const item of cycles){
+      const column=document.createElement('div');column.className='year-chart-column';
+      const bar=document.createElement('div');bar.className='year-chart-bar'+(item.complete?'':' incomplete');
+      bar.style.height=`${Math.max(2,Math.round(item.total/max*92))}%`;
+      bar.title=`A.Y. ${item.label}: ${formatN(item.total)} papers; ${item.status}`;
+      const n=document.createElement('span');n.className='year-chart-value';text(n,formatN(item.total));bar.appendChild(n);
+      const label=document.createElement('span');label.className='year-chart-label';text(label,item.label);
+      column.append(bar,label);chart.appendChild(column);
+      const line=document.createElement('div');line.className='year-qrow';
+      const lab=document.createElement('span');lab.className='y-label';text(lab,item.label);line.appendChild(lab);
+      const stack=document.createElement('div');stack.className='year-qbar';
+      for(const q of C.QUARTILES){const count=item.quartiles[q];if(!count)continue;const part=document.createElement('span');part.className=q==='N/A'?'na':q.toLowerCase();part.style.width=`${count/item.total*100}%`;part.title=`${q}: ${count} in A.Y. ${item.label}`;stack.appendChild(part);}
+      line.appendChild(stack);const tot=document.createElement('span');tot.className='y-total';text(tot,formatN(item.total));line.appendChild(tot);quart.appendChild(line);
+    }
+    const monthChart=$('academicMonthChart');monthChart.replaceChildren();
+    const mostRecent=cycles.at(-1),latestPapers=C.matchingAcademicRecords(state.data,state.selectedAuthor,mostRecent.start);
+    const counts=Object.fromEntries(academicMonths.map(m=>[m,0]));
+    for(const p of latestPapers)if(p.month in counts)counts[p.month]++;
+    const monthMax=Math.max(1,...Object.values(counts));
+    text($('academicMonthCaption'),`A.Y. ${mostRecent.label}: July ${mostRecent.start} – June ${mostRecent.end}${mostRecent.complete?'':' · partial/unverified cycle'}`);
+    for(const [i,m] of academicMonths.entries()){
+      const col=document.createElement('div');col.className='month-col';
+      const bar=document.createElement('div');bar.className='month-bar'+(counts[m]===monthMax&&counts[m]>0?' highlight':'');
+      bar.style.height=`${Math.max(2,Math.round(counts[m]/monthMax*93))}%`;
+      const calendarYear=i<6?mostRecent.start:mostRecent.start+1;
+      bar.title=`${m} ${calendarYear}: ${counts[m]} papers`;
+      const val=document.createElement('span');val.className='month-val';text(val,counts[m]);bar.appendChild(val);
+      const lbl=document.createElement('span');lbl.className='month-label';text(lbl,m.slice(0,3));col.append(bar,lbl);monthChart.appendChild(col);
+    }
+    const body=$('academicYearRows');body.replaceChildren();
+    cycles.forEach((item,i)=>{
+      const tr=document.createElement('tr');
+      makeCell(tr,item.label);makeCell(tr,formatN(item.total));
+      makeCell(tr,item.citationKnown?formatN(item.citationTotal):(item.total===0?'0':'N/A'));
+      makeCell(tr,item.meanCitations===null?'N/A':item.meanCitations.toFixed(2));
+      const g=academicGrowth(i?cycles[i-1]:null,item);const gcell=makeCell(tr,g);gcell.className=growthClass(g);
+      for(const q of C.QUARTILES)makeCell(tr,formatN(item.quartiles[q]));
+      makeCell(tr,item.unknownMonth?formatN(item.unknownMonth):'0');
+      const stat=makeCell(tr,item.status);stat.className=item.complete?'':'year-status';body.appendChild(tr);
+    });
+    const ranked=C.compareAcademicAuthors(state.data,state.academicFrom,state.academicTo);
+    const q=C.norm($('academicAuthorSearch').value);
+    const filtered=ranked.filter(x=>!q||C.norm(x.author.name).includes(q)||x.author.id.includes(q));
+    const head=$('academicAuthorsHead');head.replaceChildren();
+    ['Author name',...cycles.map(x=>x.label),'Period total','Q1','Current citations*','First → last'].forEach(label=>makeCell(head,label,'th'));
+    const tbody=$('academicAuthorsRows');tbody.replaceChildren();
+    for(const row of filtered){
+      const tr=document.createElement('tr');const cell=makeCell(tr,'');
+      const btn=document.createElement('button');btn.type='button';btn.className='rank-name';text(btn,row.author.name);
+      btn.addEventListener('click',()=>selectAuthor(row.author.key));cell.appendChild(btn);
+      for(const item of cycles){const value=row.byCycle[item.start];const v=makeCell(tr,formatN(value)+(row.statusByCycle[item.start].complete?'':' ⚠'));if(!row.statusByCycle[item.start].complete)v.className='year-status';}
+      makeCell(tr,formatN(row.total));makeCell(tr,formatN(row.q1));
+      makeCell(tr,row.total===0?'0':(row.total>row.missingCitations?formatN(row.citationsKnown):'N/A'));
+      const prev={total:row.byCycle[cycles[0].start],complete:row.statusByCycle[cycles[0].start].complete};
+      const curr={total:row.byCycle[cycles.at(-1).start],complete:row.statusByCycle[cycles.at(-1).start].complete};
+      const growth=cycles.length>1?academicGrowth(prev,curr):'—';const g=makeCell(tr,growth);g.className=growthClass(growth);tbody.appendChild(tr);
+    }
+    text($('academicAuthorsCount'),`${formatN(filtered.length)} of ${formatN(ranked.length)} authors · ⚠ denotes partial or unverified academic cycle`);
+  }
+  function exportAcademicComparison(){
+    const cycles=academicRanges();let previous=null;
+    const rows=cycles.map(x=>{const grow=academicGrowth(previous,x);previous=x;
+      return [x.label,`${x.start}-07-01`,`${x.end}-06-30`,x.total,x.citationKnown?x.citationTotal:(x.total===0?0:''),
+        x.citationKnown,x.citationMissing,x.meanCitations??'',grow,...C.QUARTILES.map(q=>x.quartiles[q]),
+        x.unknownMonth,x.complete?'Complete':'Incomplete',x.status];});
+    downloadCsv(`Scopus_Academic_Comparison_${academicRangeSlug()}.csv`,
+      ['Academic Year','Start Date','End Date','Papers','Citations Known','Papers With Citation Counts','Papers Missing Citation Counts','Mean Citations','Growth','Q1','Q2','Q3','Q4','N/A','Unknown Month Records In Adjacent Calendar Years','Data Coverage','Notes'],rows);
+  }
+  function exportAcademicAuthors(){
+    const cycles=academicRanges();const ranked=C.compareAcademicAuthors(state.data,state.academicFrom,state.academicTo);
+    const rows=ranked.map(row=>[row.author.name,row.author.id,
+      ...cycles.map(item=>row.byCycle[item.start]),row.total,row.q1,row.citationsKnown,row.missingCitations,
+      ...cycles.map(item=>row.statusByCycle[item.start].status)]);
+    downloadCsv(`Scopus_Academic_Authors_${academicRangeSlug()}.csv`,
+      ['Author Name','Scopus Author ID',...cycles.map(item=>'A.Y. '+item.label),'Period Total','Q1 Papers','Current Citations Known','Missing Citation Counts',
+        ...cycles.map(item=>'A.Y. '+item.label+' Coverage')],rows);
+  }
+
+  function renderAll(){renderContext();renderDirectory();renderOverview();renderComparison();renderAcademic();renderCitations();updatePaperJournalOptions();renderPapers();renderAuthors();renderJournals();}
   function switchTab(tab){state.tab=tab;document.querySelectorAll('.tab').forEach(el=>{const active=el.dataset.tab===tab;el.classList.toggle('active',active);el.setAttribute('aria-selected',String(active));});document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!=='view-'+tab);}
   function exportSummary(){const data=state.data, rows=C.rankAuthors(data,selectedRange()).map(x=>[x.author.name,x.author.profile,x.total,x.citationKnown?x.citationTotal:'',x.citationMissing,...C.QUARTILES.map(q=>x.quartiles[q]),x.author.status]);downloadCsv(`Scopus_Author_Summary_${rangeSlug()}.csv`,['Author Name','Scopus Profile URL','Papers in selected range','Citations Known','Missing Citation Counts','Q1','Q2','Q3','Q4','N/A','Retrieval Status'],rows);}
   function exportPapers(){downloadCsv(`Scopus_Papers_${rangeSlug()}_${state.selectedAuthor?'author':'institute'}.csv`,['Author Name','Paper Title','Publication Date','Month','Journal','CiteScore','CiteScore Year','Scopus Citation Count','Scopus Cited By URL','Citation Count As Of','Quartile','Highest Percentile','DOI','Scopus URL'],filteredPapers().map(p=>[p.authorName,p.title,p.date,p.month,p.journal,p.citeScore??'',p.citeScoreYear??'',p.citationCount??'',p.citedByUrl,p.citationAsOf,p.quartile,p.percentile??'',p.doi,p.scopusUrl]));}
@@ -279,6 +415,10 @@
       $('yearFrom').value=String(state.fromYear);$('yearTo').value=String(state.toYear);
       state.page=1;renderAll();
     }
+    $('academicFrom').addEventListener('change',e=>{const y=Number(e.target.value);setAcademicYears(y,Math.max(y,state.academicTo));});
+    $('academicTo').addEventListener('change',e=>{const y=Number(e.target.value);setAcademicYears(Math.min(y,state.academicFrom),y);});
+    $('academicLast2').addEventListener('click',()=>{const starts=C.academicStartOptions(state.data).filter(y=>C.academicCycleStatus(state.data,null,y).complete);if(starts.length)setAcademicYears(starts[Math.max(0,starts.length-2)],starts.at(-1));else toast('No fully complete July–June cycles are available in this report.');});
+    $('academicAll').addEventListener('click',()=>{const starts=C.academicStartOptions(state.data);setAcademicYears(starts[0],starts.at(-1));});
     $('yearFrom').addEventListener('change',e=>{let first=Number(e.target.value);setYears(first,Math.max(first,state.toYear));});
     $('yearTo').addEventListener('change',e=>{let last=Number(e.target.value);setYears(Math.min(state.fromYear,last),last);});
     $('last2Btn').addEventListener('click',()=>{const ys=[...state.data.years].sort((a,b)=>a-b);setYears(ys[Math.max(0,ys.length-2)],ys.at(-1));});
@@ -286,12 +426,14 @@
     $('allYearsBtn').addEventListener('click',()=>{const ys=[...state.data.years].sort((a,b)=>a-b);setYears(ys[0],ys.at(-1));});
     $('authorSearch').addEventListener('input',()=>{renderDirectory();const q=C.norm($('authorSearch').value);const exact=state.data.authors.filter(a=>C.norm(a.name)===q);if(exact.length===1&&exact[0].key!==state.selectedAuthor)selectAuthor(exact[0].key);});
     $('authorSearch').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const q=C.norm($('authorSearch').value);const matching=state.data.authors.filter(a=>C.norm(a.name).includes(q)||a.id.includes(q));if(q&&matching.length){selectAuthor(matching[0].key);e.preventDefault();}});
-    $('clearData').addEventListener('click',()=>{state.data=null;state.selectedAuthor=null;state.fromYear=null;state.toYear=null;state.page=1;state.loadedNames=[];state.demo=false;for(const id of ['xlsxInput','welcomeInput'])$(id).value='';$('dashboard').hidden=true;$('welcomePanel').hidden=false;toast('Report cleared from this browser tab. Nothing was saved to GitHub.');});
-    $('resetFilters').addEventListener('click',()=>{state.selectedAuthor=null;state.fromYear=Math.min(...state.data.years);state.toYear=Math.max(...state.data.years);state.page=1;$('yearFrom').value=String(state.fromYear);$('yearTo').value=String(state.toYear);$('authorSearch').value='';$('paperSearch').value='';$('paperQuartile').value='';$('paperJournal').value='';$('paperSort').value='newest';$('rankingSearch').value='';$('journalSearch').value='';$('journalQuartile').value='';renderAll();});
+    $('clearData').addEventListener('click',()=>{state.data=null;state.selectedAuthor=null;state.fromYear=null;state.toYear=null;state.academicFrom=null;state.academicTo=null;state.page=1;state.loadedNames=[];state.demo=false;for(const id of ['xlsxInput','welcomeInput'])$(id).value='';$('dashboard').hidden=true;$('welcomePanel').hidden=false;toast('Report cleared from this browser tab. Nothing was saved to GitHub.');});
+    $('resetFilters').addEventListener('click',()=>{state.selectedAuthor=null;state.fromYear=Math.min(...state.data.years);state.toYear=Math.max(...state.data.years);state.page=1;$('yearFrom').value=String(state.fromYear);$('yearTo').value=String(state.toYear);initializeAcademicControls();$('authorSearch').value='';$('paperSearch').value='';$('paperQuartile').value='';$('paperJournal').value='';$('paperSort').value='newest';$('rankingSearch').value='';$('journalSearch').value='';$('journalQuartile').value='';renderAll();});
     document.querySelectorAll('.tab').forEach(x=>x.addEventListener('click',()=>switchTab(x.dataset.tab)));
     for(const id of ['paperSearch','paperQuartile','paperJournal','paperSort'])$(id).addEventListener(id==='paperSearch'?'input':'change',()=>{state.page=1;renderPapers();});
     $('pagePrev').addEventListener('click',()=>{state.page--;renderPapers();});$('pageNext').addEventListener('click',()=>{state.page++;renderPapers();});
+    $('academicAuthorSearch').addEventListener('input',renderAcademic);
     $('compareAuthorSearch').addEventListener('input',renderComparison);$('rankingSearch').addEventListener('input',renderAuthors);$('journalSearch').addEventListener('input',renderJournals);$('journalQuartile').addEventListener('change',renderJournals);
+    $('exportAcademicComparison').addEventListener('click',exportAcademicComparison);$('exportAcademicAuthors').addEventListener('click',exportAcademicAuthors);
     $('exportCitations').addEventListener('click',exportCitations);$('exportYearComparison').addEventListener('click',exportYearComparison);$('exportAuthorComparison').addEventListener('click',exportAuthorComparison);$('exportSummaryBtn').addEventListener('click',exportSummary);$('exportAuthors').addEventListener('click',exportSummary);$('exportPapers').addEventListener('click',exportPapers);$('exportJournals').addEventListener('click',exportJournals);
     window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer?.files?.length)parseFiles(e.dataTransfer.files);});
   }
